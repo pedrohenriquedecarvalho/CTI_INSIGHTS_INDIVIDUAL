@@ -48,57 +48,72 @@ def gravar_resultado(engine: Engine, lote_id: int, tratado: pd.DataFrame, payloa
     """Grava tudo em uma única transação: ou o lote inteiro é processado, ou nada muda."""
     with engine.begin() as conn:
         # reprocessar o mesmo lote substitui o resultado anterior
-        conn.execute(text("DELETE FROM contrato WHERE id_cliente IN "
-                          "(SELECT id_cliente FROM cliente WHERE lote_id = :l)"), {"l": lote_id})
+        conn.execute(text("DELETE FROM contrato WHERE cliente_id IN "
+                          "(SELECT id FROM cliente WHERE lote_id = :l)"), {"l": lote_id})
         conn.execute(text("DELETE FROM cliente WHERE lote_id = :l"), {"l": lote_id})
         conn.execute(text("DELETE FROM estatistica_lote WHERE lote_id = :l"), {"l": lote_id})
 
         consultores: dict[str, int] = {}
         servicos: dict[str, int] = {}
+        segmentos: dict[str, int] = {}
 
         def id_consultor(nome: str) -> int:
             """Acha o consultor pelo nome ou cria um novo (sem possibilidade de login)."""
             if nome not in consultores:
-                achado = conn.execute(text("SELECT id_consultor FROM consultor WHERE nome = :n"),
+                achado = conn.execute(text("SELECT id FROM consultor WHERE nome = :n"),
                                       {"n": nome}).scalar()
                 if achado is None:
-                    slug = re.sub(r"[^a-z0-9]+", ".", nome.lower()).strip(".") or "consultor"
                     achado = conn.execute(
-                        text("INSERT INTO consultor (nome, email, senha, telefone) "
-                             "VALUES (:n, :e, '!sem-login', '') RETURNING id_consultor"),
-                        {"n": nome, "e": f"{slug}@cti.local"}).scalar_one()
+                        text("INSERT INTO consultor (nome) VALUES (:n) RETURNING id"),
+                        {"n": nome}).scalar_one()
                 consultores[nome] = achado
             return consultores[nome]
 
         def id_servico(nome: str) -> int:
             """Acha o serviço pelo nome ou cria um novo."""
             if nome not in servicos:
-                achado = conn.execute(text("SELECT id_servico FROM servico WHERE nome = :n"),
+                achado = conn.execute(text("SELECT id FROM servico WHERE nome = :n"),
                                       {"n": nome}).scalar()
                 if achado is None:
                     achado = conn.execute(
-                        text("INSERT INTO servico (nome, categoria) VALUES (:n, 'Geral') RETURNING id_servico"),
+                        text("INSERT INTO servico (nome) VALUES (:n) RETURNING id"),
                         {"n": nome}).scalar_one()
                 servicos[nome] = achado
             return servicos[nome]
 
+        def id_segmento(nome: str) -> int:
+            """Acha o segmento pelo nome ou cria um novo."""
+            if nome not in segmentos:
+                achado = conn.execute(text("SELECT id FROM segmento WHERE nome = :n"),
+                                      {"n": nome}).scalar()
+                if achado is None:
+                    achado = conn.execute(
+                        text("INSERT INTO segmento (nome) VALUES (:n) RETURNING id"),
+                        {"n": nome}).scalar_one()
+                segmentos[nome] = achado
+            return segmentos[nome]
+
         for r in tratado.itertuples(index=False):
             cliente_id = conn.execute(text("""
-                INSERT INTO cliente (lote_id, nome_empresa, id_consultor, segmento, nivel, faturamento_anual, status)
-                VALUES (:lote, :nome, :consultor, :segmento, :nivel, :fat, 'ATIVO')
-                RETURNING id_cliente
+                INSERT INTO cliente (lote_id, codigo_cti, nome, consultor_id, segmento_id,
+                                     nivel, faturamento_anual, cidade, uf)
+                VALUES (:lote, :codigo, :nome, :consultor, :segmento, :nivel, :fat, :cidade, :uf)
+                RETURNING id
             """), {
                 "lote": lote_id,
+                "codigo": r.codigo_cliente,
                 "nome": r.nome_cliente[:255],
                 "consultor": id_consultor(r.consultor[:120]),
-                "segmento": r.segmento[:40],
+                "segmento": id_segmento(r.segmento[:40]),
                 "nivel": r.nivel_cliente,
                 "fat": round(float(r.faturamento_anual), 2),
+                "cidade": getattr(r, "cidade", None),
+                "uf": getattr(r, "uf", None),
             }).scalar_one()
             for nome_servico in r.servicos:
                 conn.execute(text("""
-                    INSERT INTO contrato (id_cliente, id_servico, data_inicio, ativo)
-                    VALUES (:c, :s, :d, true)
+                    INSERT INTO contrato (cliente_id, servico_id, data_contratacao)
+                    VALUES (:c, :s, :d)
                 """), {"c": cliente_id,
                        "s": id_servico(nome_servico[:120]),
                        "d": r.data_contratacao.date()})
