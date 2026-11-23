@@ -8,7 +8,12 @@ import { dashboardService, mensagemDeErro } from '../Service/api'
 
 const moeda = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }))
 const numero = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 }))
-const dataHora = (t) => (t ? new Date(t).toLocaleString('pt-BR') : '—')
+// O banco guarda a data em UTC sem fuso; marcamos como UTC e mostramos no horário de Brasília.
+const dataHora = (t) => {
+  if (!t) return '—'
+  const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : t + 'Z'
+  return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+}
 
 const lote = ref(null)          // dados do lote (arquivo, status, totais)
 const d = ref(null)             // JSON que o Python gravou (null enquanto não termina)
