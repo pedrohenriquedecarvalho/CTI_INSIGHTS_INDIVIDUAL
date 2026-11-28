@@ -1,0 +1,9 @@
+target/
+.env
+*.env
+!.env.example
+.idea/
+*.iml
+.mvn/wrapper/maven-wrapper.jar
+_legado/
+log.txt
